@@ -1,0 +1,1 @@
+`cache` is a directory storing all temporary / intermediate data
