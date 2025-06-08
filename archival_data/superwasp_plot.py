@@ -11,9 +11,11 @@ import lightkurve as lk
 
 import numpy as np
 import pandas as pd
+import requests
 
 import matplotlib.pyplot as plt
 
+import os
 import time
 from types import SimpleNamespace
 
@@ -62,10 +64,16 @@ def _to_yyyy_mm(time_val: Time) -> str:
     return f"{dt.year}-{dt.month:02}"
 
 
-def create_superwasp_phase_plot(row, display_plot=False, save_plot=False, plot_dir="plots/superwasp"):
+def create_superwasp_phase_plot(row, display_plot=False, save_plot=False, plot_dir="plots/superwasp", skip_if_created=False):
     r = row  # shorthand to be used below
 
     sourceid, tic = r.sourceid, r.TIC
+
+    plot_filename = f"{sourceid.replace(' ', '_')}.png"
+    plot_path = f"{plot_dir}/{plot_filename}"
+
+    if skip_if_created and os.path.isfile(plot_path):
+        return SimpleNamespace(sourceid=sourceid, tic=tic, plot_path=plot_path, skipped=True)
 
     lc = read_superwasp_dr1_csv(sourceid)
     lc = lke.to_normalized_flux_from_mag(lc).normalize(unit="ppt")
@@ -125,19 +133,16 @@ median err: {np.nanmedian(lc.flux_err):.0f} ; truncated: [{orig_min.value:.0f} -
             ax.set_ylabel(None)
             ax.set_ylim(*axs["lower left"].get_ylim())  # same y scale as the primary
 
-    plot_path = None
     if save_plot:
-        plot_filename = f"{sourceid.replace(' ', '_')}.png"
-        plot_path = f"{plot_dir}/{plot_filename}"
         fig.savefig(plot_path, dpi=72, bbox_inches="tight")
 
     if display_plot:
         plt.show()
 
-    return SimpleNamespace(sourceid=sourceid, tic=tic, lc_orig=lc_orig, lc=lc, lc_f=lc_f, ax=ax, plot_path=plot_path)
+    return SimpleNamespace(sourceid=sourceid, tic=tic, lc_orig=lc_orig, lc=lc, lc_f=lc_f, ax=ax, plot_path=plot_path, skipped=False)
 
 
-def create_all_plots(sleep_time=1, first_n=None):
+def create_all_plots(sleep_time=1, first_n=None, skip_if_created=True):
     ss_df = pd.read_csv("tmp/superwasptimeseries_match_w_tic_ebp.csv")
     if first_n is not None:
         # process first_n entries, typically for trial, debug
@@ -145,12 +150,27 @@ def create_all_plots(sleep_time=1, first_n=None):
     print(f"Creating plots for {len(ss_df)} entries...")
 
     for i in range(len(ss_df)):
-        res = create_superwasp_phase_plot(ss_df.iloc[i], display_plot=False, save_plot=True)
-        print(f"{i: >4}: {res.sourceid}")
-        plt.close()
-        if sleep_time is not None and sleep_time > 0:
+        row = ss_df.iloc[i]
+        msg = f"{i: >4}: {row.sourceid}"
+        res = SimpleNamespace(skipped=False)
+        try:
+            res = create_superwasp_phase_plot(row, display_plot=False, save_plot=True, skip_if_created=skip_if_created)
+            if res.skipped:
+                msg += " [skipped]"
+            print(msg)
+            plt.close()
+        except requests.HTTPError as he:
+            if 400 <= he.response.status_code < 500:
+                # case the requested object is not found. Inform the users and continue
+                msg += f" [not found] {he}"
+                print(msg)
+            else:
+                # raise  other unexpected error
+                raise he
+        if sleep_time is not None and sleep_time > 0 and not res.skipped:
             # to avoid bombarding the server, not needed if all lightcurves have been downloaded locally
             time.sleep(sleep_time)
+
 
 
 # From command line
@@ -158,4 +178,5 @@ if __name__ == "__main__":
     create_all_plots(
         # first_n=10,
         # sleep_time=0,
+        skip_if_created=True,
     )
