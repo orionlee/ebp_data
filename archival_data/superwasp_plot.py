@@ -81,31 +81,49 @@ def create_superwasp_phase_plot(row, display_plot=False, save_plot=False, plot_d
     lc_f = lc.fold(period=r.Period, epoch_time=Time(r.T0, format="btjd"), normalize_phase=True, wrap_phase=0.7)
 
     with plt.style.context(lk.MPLSTYLE):
-        fig, axs = plt.subplots(2, 1, figsize=(8, 4 * 2))
-        plt.tight_layout()
+        fig, axs = plt.subplot_mosaic(
+            [["top", "top"],
+             ["lower left", "lower right"]],
+            figsize=(8, 4 * 2),
+        )
+
+        fig.tight_layout()
 
         fig.suptitle(f"{lc.label} / TIC {tic}, P: {r.Period} d", fontsize=12, y=1.05)
 
-        # ax = tplt.scatter_partition_by(lc_f, "camera", ax=axs[0], s=0.3, alpha=0.2)
-        ax = lc_f.scatter(ax=axs[0], s=0.7, label=None, c=lc_f.time_original.value, show_colorbar=False)
+        # ax = tplt.scatter_partition_by(lc_f, "camera", ax=axs["top"], s=1)
+        ax = lc_f.scatter(ax=axs["top"], s=1, label=None, c=lc_f.time_original.value, show_colorbar=False)
         ax.set_title(
             f"""\
-# cameras: {len(np.unique(lc.camera))}  ;  truncated [{orig_min.unit}]: [{orig_min.value:.0f}, {trunc_min.value:.0f}), ({trunc_max.value:.0f}, {orig_max.value:.0f}]
-baseline: {_to_yyyy_mm(lc.time.min())} - {_to_yyyy_mm(lc.time.max())} ({(lc.time.max() - lc.time.min()).value:.0f} d)""",
+median err: {np.nanmedian(lc.flux_err):.0f} ; truncated: [{orig_min.value:.0f} - {trunc_min.value:.0f}), ({trunc_max.value:.0f} - {orig_max.value:.0f}] [{orig_min.unit}]
+# cameras: {len(np.unique(lc.camera))}  ;  baseline: {_to_yyyy_mm(lc.time.min())} - {_to_yyyy_mm(lc.time.max())} ({(lc.time.max() - lc.time.min()).value:.0f} d)""",
             fontsize=10,
             )
         ax.set_xlabel(None)
 
-        # second plot: annotate the plot with EBP eclipse params,
-        ax = lc_f.scatter(s=0.7, alpha=0.3, ax=axs[1], label=None)
-
+        # second / third plots: zoom to eclipses and annotate the plot with EBP eclipse params,
         p_phase, p_depth, p_dur = 0, r["Depth [ppt]"], r["Duration [hr]"] / 24 / r.Period
+        p_zoom_width = p_dur * 9  # zoom window proportional to eclipse duration
+        p_zoom_width = min(max(p_zoom_width, 0.1), 0.5)  # but with a min / max of 0.1 / 0.5
+        xlim = (p_phase - p_zoom_width / 2, p_phase + p_zoom_width / 2)
+        p_lc_f = lc_f.truncate(*xlim)
+        ax = p_lc_f.scatter(s=9, alpha=0.3, ax=axs["lower left"], label=None)
+        ax.set_xlim(*xlim)  # ensure expected eclipses are centered
         ax.axvspan(p_phase - p_dur / 2, p_phase + p_dur / 2, color="red", alpha=0.2)
-        ax.vlines(p_phase, ymin=1000 - p_depth, ymax=1000, color="blue", linestyle="--", linewidth=3)
+        ax.vlines(p_phase, ymin=1000 - p_depth, ymax=1000, color="blue", linestyle="-", linewidth=3)
 
-        s_phase, s_depth, s_dur = r["Phase_sec"], r["Depth_sec"], r["Duration_sec"] / 24 / r.Period
-        ax.axvspan(s_phase - s_dur / 2, s_phase + s_dur / 2, color="red", alpha=0.1)
-        ax.vlines(s_phase, ymin=1000 - s_depth, ymax=1000, color="blue", linestyle="--", linewidth=3)
+        if np.isfinite(r["Phase_sec"]):  # has secondary eclipses
+            s_phase, s_depth, s_dur = r["Phase_sec"], r["Depth_sec"], r["Duration_sec"] / 24 / r.Period
+            s_zoom_width = s_dur * 9  # zoom window proportional to eclipse duration
+            s_zoom_width = min(max(s_zoom_width, 0.1), 0.5)  # but with a min / max of 0.1 / 0.5
+            xlim = (s_phase - s_zoom_width / 2, s_phase + s_zoom_width / 2)
+            s_lc_f = lc_f.truncate(*xlim)
+            ax = s_lc_f.scatter(s=9, alpha=0.3, ax=axs["lower right"], label=None)
+            ax.set_xlim(*xlim)  # ensure expected eclipses are centered
+            ax.axvspan(s_phase - s_dur / 2, s_phase + s_dur / 2, color="red", alpha=0.1)
+            ax.vlines(s_phase, ymin=1000 - s_depth, ymax=1000, color="blue", linestyle="-", linewidth=3)
+            ax.set_ylabel(None)
+            ax.set_ylim(*axs["lower left"].get_ylim())  # same y scale as the primary
 
     plot_path = None
     if save_plot:
@@ -129,6 +147,7 @@ def create_all_plots(sleep_time=1, first_n=None):
     for i in range(len(ss_df)):
         res = create_superwasp_phase_plot(ss_df.iloc[i], display_plot=False, save_plot=True)
         print(f"{i: >4}: {res.sourceid}")
+        plt.close()
         if sleep_time is not None and sleep_time > 0:
             # to avoid bombarding the server, not needed if all lightcurves have been downloaded locally
             time.sleep(sleep_time)
