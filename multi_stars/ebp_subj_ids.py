@@ -104,6 +104,11 @@ def save_all_subject_ids_from_all(skip_if_exists=True):
     _combine_n_save_all_subject_ids()
 
 
+def load_subject_ids_from_file():
+    csv_path = Path("data/ebp_subj_ids.csv")
+    return np.genfromtxt(csv_path, dtype=int)
+
+
 #
 # Top level driver
 #

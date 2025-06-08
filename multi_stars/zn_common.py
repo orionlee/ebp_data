@@ -130,3 +130,11 @@ def get_subject_ids_of_collection(collection_name, result_func=None):
     print(f"[DEBUG] collection: {collection_name}")
     subject_ids = _get_subject_ids_of_collection(collection_name)
     result_func(subject_ids)
+
+
+@sleep_and_retry
+@limits(calls=NUM_CALLS, period=TEN_SECONDS)
+def get_subject_meta_of_id(id):
+    url = f"https://www.zooniverse.org/api/subjects/{id}?http_cache=true&include=project"
+    return fetch_json(url)  # return plain JSON, the details are project specific
+
