@@ -5,6 +5,6 @@ poetry.lock
 
 
 multi_stars/data/cache/*.csv
-
+archival_data/data/cache/superwasp/*.csv
 *Scratch*.ipynb
 tmp/
