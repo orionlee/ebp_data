@@ -5,6 +5,7 @@ poetry.lock
 
 
 multi_stars/data/cache/*.csv
+multi_stars/data/cache/**/*.json
 archival_data/data/cache/superwasp/*.csv
 archival_data/data/cache/superwasp/*.fits
 archival_data/data/cache/superwasp/*.tbl

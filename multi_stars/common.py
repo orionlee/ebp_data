@@ -1,8 +1,10 @@
 from collections.abc import Mapping, Sequence
 import csv
+import json
 import os
 
 from astropy.table import Table
+import numpy as np
 import pandas as pd
 
 
@@ -51,3 +53,22 @@ def to_csv(data, out_path, mode="a", fieldnames=None):
         [to_csv_of_dict(a_dict) for a_dict in data]
     else:
         raise TypeError(f"Unsupported type for `data`: {type(dict)}")
+
+
+# from https://stackoverflow.com/a/57915246
+class NpEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        if isinstance(obj, np.floating):
+            return float(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return super(NpEncoder, self).default(obj)
+
+
+## Used to serialize Comments
+def json_np_dump(obj, fp, **kwargs):
+    """JSON dump that supports numpy data types"""
+    kwargs["cls"] = NpEncoder
+    return json.dump(obj, fp, **kwargs)
