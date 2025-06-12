@@ -64,6 +64,117 @@ def _to_yyyy_mm(time_val: Time) -> str:
     return f"{dt.year}-{dt.month:02}"
 
 
+def create_phase_plot(lc, target_name, r, t0_time_format, truncate_sigma_upper=3, truncate_sigma_lower=9, show_secondary_phase_plot=False):
+    def safe_get(dict_like, key, default_value=np.nan):
+        try:
+            return dict_like[key]
+        except KeyError:
+            return default_value
+
+    def get_t0_secondary():
+        if np.isfinite(safe_get(r, "T0_sec")):  # has secondary eclipses
+            return Time(r["T0_sec"], format=t0_time_format)
+        elif np.isfinite(safe_get(r, ["Phase_sec"])):  # has secondary eclipses (in phase)
+            return Time(r["T0"] + r["Period"] * r["Phase_sec"], format=t0_time_format)
+        else:
+            return None
+
+    if target_name is None:
+        target_name = lc.meta.get("LABEL", "<No target name>")
+
+    lc = lc.remove_nans()  # nans will screw up truncation info display
+    lc_orig = lc
+
+    orig_min, orig_max = lc_orig.flux.min(), lc_orig.flux.max()
+
+    lc = lc.remove_outliers(sigma_upper=truncate_sigma_upper, sigma_lower=truncate_sigma_lower)
+
+    trunc_min, trunc_max = lc.flux.min(), lc.flux.max()
+
+    t0 = Time(r["T0"], format=t0_time_format)
+    lc_f = lc.fold(period=r['Period'], epoch_time=t0, normalize_phase=True, wrap_phase=0.7)
+
+    lc_f_sec = None
+    if show_secondary_phase_plot:
+        t0_sec = get_t0_secondary()
+        period_sec = safe_get(r, "Period_sec")
+        if not np.isfinite(period_sec):
+            period_sec = r["Period"]
+        lc_f_sec = lc.fold(period=period_sec, epoch_time=t0_sec, normalize_phase=True, wrap_phase=0.7)
+
+    with plt.style.context(lk.MPLSTYLE):
+        if not show_secondary_phase_plot:
+            fig, axs = plt.subplot_mosaic(
+                [
+                    ["pri", "pri"],
+                    ["priz left", "priz right"],  # zoomed to eclipses
+                ],
+                figsize=(8, 4 * 2),
+            )
+        else:
+            fig, axs = plt.subplot_mosaic(
+                [
+                    ["pri", "pri"],
+                    ["priz left", "priz right"],  # zoomed to eclipses
+                    ["sec", "sec"],
+                ],
+                figsize=(8, 4 * 3),
+            )
+
+        fig.tight_layout()
+
+        fig.suptitle(f"{target_name}, P: {r['Period']} d", fontsize=12, y=1.05)
+
+        # ax = tplt.scatter_partition_by(lc_f, "camera", ax=axs["pri"], s=1)
+        ax = lc_f.scatter(ax=axs["pri"], s=1, label=f"t0: primary,\nP_pri: {lc_f.period}", c=lc_f.time_original.value, show_colorbar=False)
+        ax.legend(loc="lower right")
+        camera_like_info = ""
+        if "camera" in lc.colnames:  # SuperWASP-specific
+            camera_like_info = f"  ;  # cameras: {len(np.unique(lc.camera))}"
+        ax.set_title(
+            f"""\
+median err: {np.nanmedian(lc.flux_err):.0f} ; truncated: [{orig_min.value:.0f} - {trunc_min.value:.0f}), ({trunc_max.value:.0f} - {orig_max.value:.0f}] [{orig_min.unit}]
+baseline: {_to_yyyy_mm(lc.time.min())} - {_to_yyyy_mm(lc.time.max())} ({(lc.time.max() - lc.time.min()).value:.0f} d){camera_like_info}""",
+            fontsize=10,
+            )
+        ax.set_xlabel(None)
+
+        # second / third plots: zoom to eclipses and annotate the plot with EBP eclipse params,
+        p_phase, p_depth, p_dur = 0, r["Depth [ppt]"], r["Duration [hr]"] / 24 / r['Period']
+        p_zoom_width = p_dur * 9  # zoom window proportional to eclipse duration
+        p_zoom_width = min(max(p_zoom_width, 0.1), 0.5)  # but with a min / max of 0.1 / 0.5
+        xlim = (p_phase - p_zoom_width / 2, p_phase + p_zoom_width / 2)
+        p_lc_f = lc_f.truncate(*xlim)
+        ax = p_lc_f.scatter(s=9, alpha=0.3, ax=axs["priz left"], label=None)
+        ax.set_xlim(*xlim)  # ensure expected eclipses are centered
+        ax.axvspan(p_phase - p_dur / 2, p_phase + p_dur / 2, color="red", alpha=0.2)
+        ax.vlines(p_phase, ymin=1000 - p_depth, ymax=1000, color="blue", linestyle="-", linewidth=3)
+        ax.set_xlabel(None)
+
+        if np.isfinite(safe_get(r, "Phase_sec")):
+            # Zoom in to secondary
+            s_phase, s_depth, s_dur = r["Phase_sec"], r["Depth_sec"], r["Duration_sec"] / 24 / r['Period']
+            s_zoom_width = s_dur * 9  # zoom window proportional to eclipse duration
+            s_zoom_width = min(max(s_zoom_width, 0.1), 0.5)  # but with a min / max of 0.1 / 0.5
+            xlim = (s_phase - s_zoom_width / 2, s_phase + s_zoom_width / 2)
+            s_lc_f = lc_f.truncate(*xlim)
+            ax = s_lc_f.scatter(s=9, alpha=0.3, ax=axs["priz right"], label=None)
+            ax.set_xlim(*xlim)  # ensure expected eclipses are centered
+            ax.axvspan(s_phase - s_dur / 2, s_phase + s_dur / 2, color="red", alpha=0.1)
+            ax.vlines(s_phase, ymin=1000 - s_depth, ymax=1000, color="blue", linestyle="-", linewidth=3)
+            ax.set_xlabel(None)
+            ax.set_ylabel(None)
+            ax.set_ylim(*axs["priz left"].get_ylim())  # same y scale as the primary
+
+        if lc_f_sec is not None:
+            ax = lc_f_sec.scatter(ax=axs["sec"], s=1, label=f"t0: secondary,\nP_sec: {lc_f_sec.period}", c=lc_f_sec.time_original.value, show_colorbar=False)
+            ax.legend(loc="lower right")
+            # Note: avoid using ax.set_title(), as it will bleed into the zoom plot above
+            # ax.text(0.98, 0.98, f"P_sec: {lc_f_sec.period}", transform=ax.transAxes,  ha="right", va="top")
+
+    return fig, lc, lc_f
+
+
 def create_superwasp_phase_plot(row, display_plot=False, save_plot=False, plot_dir="plots/superwasp", skip_if_created=False):
     r = row  # shorthand to be used below
 
@@ -75,63 +186,11 @@ def create_superwasp_phase_plot(row, display_plot=False, save_plot=False, plot_d
     if skip_if_created and os.path.isfile(plot_path):
         return SimpleNamespace(sourceid=sourceid, tic=tic, plot_path=plot_path, skipped=True)
 
-    lc = read_superwasp_dr1_csv(sourceid)
-    lc = lke.to_normalized_flux_from_mag(lc).normalize(unit="ppt")
+    lc_orig = read_superwasp_dr1_csv(sourceid)
+    lc_orig = lke.to_normalized_flux_from_mag(lc_orig).normalize(unit="ppt")
 
-    lc_orig = lc
-
-    orig_min, orig_max = lc_orig.flux.min(), lc_orig.flux.max()
-
-    lc = lc.remove_outliers(sigma_upper=3, sigma_lower=9)
-
-    trunc_min, trunc_max = lc.flux.min(), lc.flux.max()
-
-    lc_f = lc.fold(period=r.Period, epoch_time=Time(r.T0, format="btjd"), normalize_phase=True, wrap_phase=0.7)
-
-    with plt.style.context(lk.MPLSTYLE):
-        fig, axs = plt.subplot_mosaic(
-            [["top", "top"],
-             ["lower left", "lower right"]],
-            figsize=(8, 4 * 2),
-        )
-
-        fig.tight_layout()
-
-        fig.suptitle(f"{lc.label} / TIC {tic}, P: {r.Period} d", fontsize=12, y=1.05)
-
-        # ax = tplt.scatter_partition_by(lc_f, "camera", ax=axs["top"], s=1)
-        ax = lc_f.scatter(ax=axs["top"], s=1, label=None, c=lc_f.time_original.value, show_colorbar=False)
-        ax.set_title(
-            f"""\
-median err: {np.nanmedian(lc.flux_err):.0f} ; truncated: [{orig_min.value:.0f} - {trunc_min.value:.0f}), ({trunc_max.value:.0f} - {orig_max.value:.0f}] [{orig_min.unit}]
-# cameras: {len(np.unique(lc.camera))}  ;  baseline: {_to_yyyy_mm(lc.time.min())} - {_to_yyyy_mm(lc.time.max())} ({(lc.time.max() - lc.time.min()).value:.0f} d)""",
-            fontsize=10,
-            )
-        ax.set_xlabel(None)
-
-        # second / third plots: zoom to eclipses and annotate the plot with EBP eclipse params,
-        p_phase, p_depth, p_dur = 0, r["Depth [ppt]"], r["Duration [hr]"] / 24 / r.Period
-        p_zoom_width = p_dur * 9  # zoom window proportional to eclipse duration
-        p_zoom_width = min(max(p_zoom_width, 0.1), 0.5)  # but with a min / max of 0.1 / 0.5
-        xlim = (p_phase - p_zoom_width / 2, p_phase + p_zoom_width / 2)
-        p_lc_f = lc_f.truncate(*xlim)
-        ax = p_lc_f.scatter(s=9, alpha=0.3, ax=axs["lower left"], label=None)
-        ax.set_xlim(*xlim)  # ensure expected eclipses are centered
-        ax.axvspan(p_phase - p_dur / 2, p_phase + p_dur / 2, color="red", alpha=0.2)
-        ax.vlines(p_phase, ymin=1000 - p_depth, ymax=1000, color="blue", linestyle="-", linewidth=3)
-
-        if np.isfinite(r["Phase_sec"]):  # has secondary eclipses
-            s_phase, s_depth, s_dur = r["Phase_sec"], r["Depth_sec"], r["Duration_sec"] / 24 / r.Period
-            s_zoom_width = s_dur * 9  # zoom window proportional to eclipse duration
-            s_zoom_width = min(max(s_zoom_width, 0.1), 0.5)  # but with a min / max of 0.1 / 0.5
-            xlim = (s_phase - s_zoom_width / 2, s_phase + s_zoom_width / 2)
-            s_lc_f = lc_f.truncate(*xlim)
-            ax = s_lc_f.scatter(s=9, alpha=0.3, ax=axs["lower right"], label=None)
-            ax.set_xlim(*xlim)  # ensure expected eclipses are centered
-            ax.axvspan(s_phase - s_dur / 2, s_phase + s_dur / 2, color="red", alpha=0.1)
-            ax.vlines(s_phase, ymin=1000 - s_depth, ymax=1000, color="blue", linestyle="-", linewidth=3)
-            ax.set_ylabel(None)
-            ax.set_ylim(*axs["lower left"].get_ylim())  # same y scale as the primary
+    # returned LC has outliers truncated
+    fig, lc, lc_f = create_phase_plot(lc_orig, f"{lc_orig.label} / TIC {tic}", r, "btjd")
 
     if save_plot:
         fig.savefig(plot_path, dpi=72, bbox_inches="tight")
@@ -139,7 +198,7 @@ median err: {np.nanmedian(lc.flux_err):.0f} ; truncated: [{orig_min.value:.0f} -
     if display_plot:
         plt.show()
 
-    return SimpleNamespace(sourceid=sourceid, tic=tic, lc_orig=lc_orig, lc=lc, lc_f=lc_f, ax=ax, plot_path=plot_path, skipped=False)
+    return SimpleNamespace(sourceid=sourceid, tic=tic, lc_orig=lc_orig, lc=lc, lc_f=lc_f, fig=fig, plot_path=plot_path, skipped=False)
 
 
 def create_all_plots(sleep_time=1, first_n=None, skip_if_created=True):
@@ -170,7 +229,6 @@ def create_all_plots(sleep_time=1, first_n=None, skip_if_created=True):
         if sleep_time is not None and sleep_time > 0 and not res.skipped:
             # to avoid bombarding the server, not needed if all lightcurves have been downloaded locally
             time.sleep(sleep_time)
-
 
 
 # From command line
