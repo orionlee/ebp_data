@@ -5,6 +5,7 @@ if "../../PH_TESS_LightCurveViewer/" not in sys.path:  # to get some helpers
 from astropy.table import Table
 from astropy.time import Time
 import astropy.units as u
+from astropy.units import Quantity
 
 import lightkurve as lk
 
@@ -148,7 +149,10 @@ baseline: {_to_yyyy_mm(lc.time.min())} - {_to_yyyy_mm(lc.time.max())} ({(lc.time
         ax = p_lc_f.scatter(s=9, alpha=0.3, ax=axs["priz left"], label=None)
         ax.set_xlim(*xlim)  # ensure expected eclipses are centered
         ax.axvspan(p_phase - p_dur / 2, p_phase + p_dur / 2, color="red", alpha=0.2)
-        ax.vlines(p_phase, ymin=1000 - p_depth, ymax=1000, color="blue", linestyle="-", linewidth=3)
+        f_median = np.nanmedian(lc.flux)
+        ymin = (f_median - Quantity(p_depth, unit="ppt")).to(f_median.unit).value
+        ymax = f_median.value
+        ax.vlines(p_phase, ymin=ymin, ymax=ymax, color="blue", linestyle="-", linewidth=3)
         ax.set_xlabel(None)
 
         if np.isfinite(safe_get(r, "Phase_sec")):
@@ -161,7 +165,10 @@ baseline: {_to_yyyy_mm(lc.time.min())} - {_to_yyyy_mm(lc.time.max())} ({(lc.time
             ax = s_lc_f.scatter(s=9, alpha=0.3, ax=axs["priz right"], label=None)
             ax.set_xlim(*xlim)  # ensure expected eclipses are centered
             ax.axvspan(s_phase - s_dur / 2, s_phase + s_dur / 2, color="red", alpha=0.1)
-            ax.vlines(s_phase, ymin=1000 - s_depth, ymax=1000, color="blue", linestyle="-", linewidth=3)
+            f_median = np.nanmedian(lc.flux)
+            ymin = (f_median - Quantity(s_depth, unit="ppt")).to(f_median.unit).value
+            ymax = f_median.value
+            ax.vlines(s_phase, ymin=ymin, ymax=ymax, color="blue", linestyle="-", linewidth=3)
             ax.set_xlabel(None)
             ax.set_ylabel(None)
             ax.set_ylim(*axs["priz left"].get_ylim())  # same y scale as the primary
