@@ -89,7 +89,7 @@ def estimate_min_and_plot(lc_b, ax):
     min_flux = lc_b.flux[min_idx]
     depth = (1 * u.dimensionless_unscaled - lc_b.flux[min_idx]).to(lc_b.flux.unit)
 
-    ax.scatter(min_time,  min_flux.value,  edgecolor="red", facecolor=(0, 0, 0, 0), marker="o", s=64, label="Min estimate")
+    ax.scatter(min_time,  min_flux.value,  edgecolor="red", facecolor=(0, 0, 0, 0), marker="o", s=100, label="Min estimate")
     return SimpleNamespace(idx=min_idx, time=min_time, flux=min_flux, depth=depth)
 
 
@@ -173,12 +173,13 @@ def create_phase_plot(
                 print(f"Unexpected error in binning {target_name}. Binning is skipped. {e}")
 
         ax.legend(loc="lower right")
+        flux_err_median = np.nanmedian(lc.flux_err)
         camera_like_info = ""
         if "camera" in lc.colnames:  # SuperWASP-specific
             camera_like_info = f"  ;  # cameras: {len(np.unique(lc.camera))}"
         ax.set_title(
             f"""\
-median err: {np.nanmedian(lc.flux_err):.0f} ; truncated: [{orig_min.value:.0f} - {trunc_min.value:.0f}), ({trunc_max.value:.0f} - {orig_max.value:.0f}] [{orig_min.unit}]
+median err: {flux_err_median:.0f} ; truncated: [{orig_min.value:.0f} - {trunc_min.value:.0f}), ({trunc_max.value:.0f} - {orig_max.value:.0f}] [{orig_min.unit}]
 baseline: {_to_yyyy_mm(lc.time.min())} - {_to_yyyy_mm(lc.time.max())} ({(lc.time.max() - lc.time.min()).value:.0f} d){camera_like_info}""",
             fontsize=10,
             )
@@ -191,12 +192,17 @@ baseline: {_to_yyyy_mm(lc.time.min())} - {_to_yyyy_mm(lc.time.max())} ({(lc.time
         xlim = (p_phase - p_zoom_width / 2, p_phase + p_zoom_width / 2)
         p_lc_f = lc_f.truncate(*xlim)
         ax = p_lc_f.scatter(s=9, alpha=0.3, ax=axs["priz left"], label=None)
-        ax.set_xlim(*xlim)  # ensure expected eclipses are centered
+        ax.set_xlim(*xlim)  # ensure expected eclipses are centered and x scale is constant
         ax.axvspan(p_phase - p_dur / 2, p_phase + p_dur / 2, color="red", alpha=0.2)
         f_median = np.nanmedian(lc.flux)
         ymin = (f_median - Quantity(p_depth, unit="ppt")).to(f_median.unit).value
         ymax = f_median.value
         ax.vlines(p_phase, ymin=ymin, ymax=ymax, color="blue", linestyle="-", linewidth=3)
+        p_depth_to_flux_err = Quantity(p_depth, "ppt") / flux_err_median
+        ax.text(
+            0.04, 0.02, f"Depth_pri\n / median err\n = {p_depth_to_flux_err:.0f}",
+            transform=ax.transAxes, color="blue", ha="left", va="bottom",
+        )
         ax.set_xlabel(None)
 
         if np.isfinite(safe_get(r, "Phase_sec")):
@@ -207,12 +213,17 @@ baseline: {_to_yyyy_mm(lc.time.min())} - {_to_yyyy_mm(lc.time.max())} ({(lc.time
             xlim = (s_phase - s_zoom_width / 2, s_phase + s_zoom_width / 2)
             s_lc_f = lc_f.truncate(*xlim)
             ax = s_lc_f.scatter(s=9, alpha=0.3, ax=axs["priz right"], label=None)
-            ax.set_xlim(*xlim)  # ensure expected eclipses are centered
+            ax.set_xlim(*xlim)  # ensure expected eclipses are centered and x scale is constant
             ax.axvspan(s_phase - s_dur / 2, s_phase + s_dur / 2, color="red", alpha=0.1)
             f_median = np.nanmedian(lc.flux)
             ymin = (f_median - Quantity(s_depth, unit="ppt")).to(f_median.unit).value
             ymax = f_median.value
             ax.vlines(s_phase, ymin=ymin, ymax=ymax, color="blue", linestyle="-", linewidth=3)
+            s_depth_to_flux_err = Quantity(s_depth, "ppt") / flux_err_median
+            ax.text(
+                0.04, 0.02, f"Depth_sec\n/ median err\n = {s_depth_to_flux_err:.0f}",
+                transform=ax.transAxes, color="blue", ha="left", va="bottom",
+            )
             ax.set_xlabel(None)
             ax.set_ylabel(None)
             ax.set_ylim(*axs["priz left"].get_ylim())  # same y scale as the primary
