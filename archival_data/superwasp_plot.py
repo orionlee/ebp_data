@@ -2,6 +2,9 @@ import sys
 if "../../PH_TESS_LightCurveViewer/" not in sys.path:  # to get some helpers
     sys.path.append("../../PH_TESS_LightCurveViewer/")
 
+if "../" not in sys.path:  # to get some helpers
+    sys.path.append("../")
+
 from astropy.table import Table
 from astropy.time import Time
 import astropy.units as u
@@ -21,6 +24,7 @@ import time
 from types import SimpleNamespace
 
 # my helpers
+from multi_stars.common import to_csv  # from ../multi_stars
 import lightkurve_ext as lke
 import download_utils
 # import tic_plot as tplt
@@ -65,7 +69,36 @@ def _to_yyyy_mm(time_val: Time) -> str:
     return f"{dt.year}-{dt.month:02}"
 
 
-def create_phase_plot(lc, target_name, r, t0_time_format, truncate_sigma_upper=3, truncate_sigma_lower=9, show_secondary_phase_plot=False):
+def bin_flux_and_plot(lc, ax, bins=200, aggregate_func=np.nanmedian):
+    # I need to first copy the object because of issues in underlying astropy FoldedTimeSeries
+    #  (e.g., normalized phase time column is in Quantity type rather than Time)
+    lc_min = lc.copy()
+    cols_to_remove = [c for c in lc_min.colnames if c not in ["time", "flux", "flux_err"]]
+    lc_min.remove_columns(names=cols_to_remove)
+    # by default use median (instead of mean) to reduce the effect of outliers
+    lc_b = lc_min.bin(bins=bins, aggregate_func=aggregate_func)
+
+    ax = lc_b.scatter(ax=ax, c="black", s=16, label="binned")
+
+    return lc_b
+
+
+def estimate_min_and_plot(lc_b, ax):
+    min_idx = np.nanargmin(lc_b.flux)
+    min_time = lc_b.time[min_idx]
+    min_flux = lc_b.flux[min_idx]
+    depth = (1 * u.dimensionless_unscaled - lc_b.flux[min_idx]).to(lc_b.flux.unit)
+
+    ax.scatter(min_time,  min_flux.value,  edgecolor="red", facecolor=(0, 0, 0, 0), marker="o", s=64, label="Min estimate")
+    return SimpleNamespace(idx=min_idx, time=min_time, flux=min_flux, depth=depth)
+
+
+def create_phase_plot(
+    lc, target_name, r, t0_time_format,
+    truncate_sigma_upper=3, truncate_sigma_lower=9,
+    wrap_phase=0.7,
+    show_secondary_phase_plot=False,
+):
     def safe_get(dict_like, key, default_value=np.nan):
         try:
             return dict_like[key]
@@ -93,7 +126,7 @@ def create_phase_plot(lc, target_name, r, t0_time_format, truncate_sigma_upper=3
     trunc_min, trunc_max = lc.flux.min(), lc.flux.max()
 
     t0 = Time(r["T0"], format=t0_time_format)
-    lc_f = lc.fold(period=r['Period'], epoch_time=t0, normalize_phase=True, wrap_phase=0.7)
+    lc_f = lc.fold(period=r['Period'], epoch_time=t0, normalize_phase=True, wrap_phase=wrap_phase)
 
     lc_f_sec = None
     if show_secondary_phase_plot:
@@ -101,7 +134,7 @@ def create_phase_plot(lc, target_name, r, t0_time_format, truncate_sigma_upper=3
         period_sec = safe_get(r, "Period_sec")
         if not np.isfinite(period_sec):
             period_sec = r["Period"]
-        lc_f_sec = lc.fold(period=period_sec, epoch_time=t0_sec, normalize_phase=True, wrap_phase=0.7)
+        lc_f_sec = lc.fold(period=period_sec, epoch_time=t0_sec, normalize_phase=True, wrap_phase=wrap_phase)
 
     with plt.style.context(lk.MPLSTYLE):
         if not show_secondary_phase_plot:
@@ -127,7 +160,18 @@ def create_phase_plot(lc, target_name, r, t0_time_format, truncate_sigma_upper=3
         fig.suptitle(f"{target_name}, P: {r['Period']} d", fontsize=12, y=1.05)
 
         # ax = tplt.scatter_partition_by(lc_f, "camera", ax=axs["pri"], s=1)
-        ax = lc_f.scatter(ax=axs["pri"], s=1, label=f"t0: primary,\nP_pri: {lc_f.period}", c=lc_f.time_original.value, show_colorbar=False)
+        ax = lc_f.scatter(ax=axs["pri"], s=1, label="t0: primary", c=lc_f.time_original.value, show_colorbar=False)
+        ax.set_xlim(wrap_phase - 1, wrap_phase)  # ensure constant x scale independent of the data
+
+        min_i_est = SimpleNamespace(idx=-1, time=np.nan, flux=np.nan * lc_f.flux.unit, depth=np.nan * lc_f.flux.unit)
+        if len(lc_f) > 40:
+            # attempt binning only if there is some reasonable number of data points
+            try:
+                lc_f_b = bin_flux_and_plot(lc_f, ax)
+                min_i_est = estimate_min_and_plot(lc_f_b, ax)
+            except Exception as e:
+                print(f"Unexpected error in binning {target_name}. Binning is skipped. {e}")
+
         ax.legend(loc="lower right")
         camera_like_info = ""
         if "camera" in lc.colnames:  # SuperWASP-specific
@@ -175,14 +219,20 @@ baseline: {_to_yyyy_mm(lc.time.min())} - {_to_yyyy_mm(lc.time.max())} ({(lc.time
 
         if lc_f_sec is not None:
             ax = lc_f_sec.scatter(ax=axs["sec"], s=1, label=f"t0: secondary,\nP_sec: {lc_f_sec.period}", c=lc_f_sec.time_original.value, show_colorbar=False)
+            ax.set_xlim(wrap_phase - 1, wrap_phase)  # ensure constant x scale independent of the data
             ax.legend(loc="lower right")
             # Note: avoid using ax.set_title(), as it will bleed into the zoom plot above
             # ax.text(0.98, 0.98, f"P_sec: {lc_f_sec.period}", transform=ax.transAxes,  ha="right", va="top")
 
-    return fig, lc, lc_f
+    return fig, lc, lc_f, min_i_est
 
 
-def create_superwasp_phase_plot(row, display_plot=False, save_plot=False, plot_dir="plots/superwasp", skip_if_created=False):
+def create_superwasp_phase_plot(
+    row,
+    truncate_sigma_upper=3, truncate_sigma_lower=9,
+    wrap_phase=0.7,
+    display_plot=False, save_plot=False, plot_dir="plots/superwasp", skip_if_created=False,
+):
     r = row  # shorthand to be used below
 
     sourceid, tic = r.sourceid, r.TIC
@@ -197,7 +247,11 @@ def create_superwasp_phase_plot(row, display_plot=False, save_plot=False, plot_d
     lc_orig = lke.to_normalized_flux_from_mag(lc_orig).normalize(unit="ppt")
 
     # returned LC has outliers truncated
-    fig, lc, lc_f = create_phase_plot(lc_orig, f"{lc_orig.label} / TIC {tic}", r, "btjd")
+    fig, lc, lc_f, min_i_est = create_phase_plot(
+        lc_orig, f"{lc_orig.label} / TIC {tic}", r, "btjd",
+        truncate_sigma_upper=truncate_sigma_upper, truncate_sigma_lower=truncate_sigma_lower,
+        wrap_phase=wrap_phase,
+    )
 
     if save_plot:
         fig.savefig(plot_path, dpi=72, bbox_inches="tight")
@@ -205,10 +259,13 @@ def create_superwasp_phase_plot(row, display_plot=False, save_plot=False, plot_d
     if display_plot:
         plt.show()
 
-    return SimpleNamespace(sourceid=sourceid, tic=tic, lc_orig=lc_orig, lc=lc, lc_f=lc_f, fig=fig, plot_path=plot_path, skipped=False)
+    return SimpleNamespace(
+        sourceid=sourceid, tic=tic, lc_orig=lc_orig, lc=lc, lc_f=lc_f, fig=fig, min_i_est=min_i_est,
+        plot_path=plot_path, skipped=False,
+    )
 
 
-def create_all_plots(sleep_time=1, first_n=None, skip_if_created=True):
+def create_all_plots(sleep_time=1, first_n=None, min_i_est_out_path="tmp/superwasptimeseries_match_w_tic_min_i_est.csv", plot_dir="plots/superwasp", skip_if_created=True):
     ss_df = pd.read_csv("tmp/superwasptimeseries_match_w_tic_ebp.csv")
     if first_n is not None:
         # process first_n entries, typically for trial, debug
@@ -220,11 +277,21 @@ def create_all_plots(sleep_time=1, first_n=None, skip_if_created=True):
         msg = f"{i: >4}: {row.sourceid}"
         res = SimpleNamespace(skipped=False)
         try:
-            res = create_superwasp_phase_plot(row, display_plot=False, save_plot=True, skip_if_created=skip_if_created)
+            res = create_superwasp_phase_plot(
+                row, display_plot=False, save_plot=True, plot_dir=plot_dir, skip_if_created=skip_if_created
+                )
             if res.skipped:
                 msg += " [skipped]"
             print(msg)
             plt.close()
+            if min_i_est_out_path is not None and not res.skipped:
+                min_i_est_dict = dict(
+                    sourceid=row.sourceid,
+                    est_min_i_phase=res.min_i_est.time,
+                    est_min_i_flux=res.min_i_est.flux.value,
+                    est_min_i_depth=res.min_i_est.depth.value,
+                    )
+                to_csv(min_i_est_dict, min_i_est_out_path, mode="a")
         except requests.HTTPError as he:
             if 400 <= he.response.status_code < 500:
                 # case the requested object is not found. Inform the users and continue
@@ -239,9 +306,12 @@ def create_all_plots(sleep_time=1, first_n=None, skip_if_created=True):
 
 
 # From command line
+# - might need to first remove existing tmp/superwasptimeseries_match_w_tic_min_i_est.csv if rerunning
+#   (the script appends to csv)
 if __name__ == "__main__":
     create_all_plots(
         # first_n=10,
-        # sleep_time=0,
-        skip_if_created=True,
+        sleep_time=0,
+        plot_dir="plots/tmp",
+        # skip_if_created=False,
     )
