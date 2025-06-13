@@ -12,3 +12,5 @@ archival_data/data/cache/superwasp/*.tbl
 
 *Scratch*.ipynb
 tmp/
+tmp*/
+
