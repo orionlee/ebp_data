@@ -208,6 +208,8 @@ baseline: {_to_yyyy_mm(lc.time.min())} - {_to_yyyy_mm(lc.time.max())} ({(lc.time
         if np.isfinite(safe_get(r, "Phase_sec")):
             # Zoom in to secondary
             s_phase, s_depth, s_dur = r["Phase_sec"], r["Depth_sec"], r["Duration_sec"] / 24 / r['Period']
+            if s_phase > wrap_phase:
+                s_phase = s_phase - 1
             s_zoom_width = s_dur * 9  # zoom window proportional to eclipse duration
             s_zoom_width = min(max(s_zoom_width, 0.1), 0.5)  # but with a min / max of 0.1 / 0.5
             xlim = (s_phase - s_zoom_width / 2, s_phase + s_zoom_width / 2)
