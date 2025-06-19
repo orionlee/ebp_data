@@ -242,6 +242,7 @@ baseline: {_to_yyyy_mm(lc.time.min())} - {_to_yyyy_mm(lc.time.max())} ({(lc.time
 
 def create_superwasp_phase_plot(
     row,
+    lc_preprocess_func=None,
     truncate_sigma_upper=3, truncate_sigma_lower=9,
     wrap_phase=0.7,
     display_plot=False, save_plot=False, plot_dir="plots/superwasp", skip_if_created=False,
@@ -258,6 +259,9 @@ def create_superwasp_phase_plot(
 
     lc_orig = read_superwasp_dr1_csv(sourceid)
     lc_orig = lke.to_normalized_flux_from_mag(lc_orig).normalize(unit="ppt")
+
+    if lc_preprocess_func is not None:
+        lc_orig = lc_preprocess_func(lc_orig)
 
     # returned LC has outliers truncated
     fig, lc, lc_f, min_i_est = create_phase_plot(
