@@ -69,7 +69,7 @@ def _to_yyyy_mm(time_val: Time) -> str:
     return f"{dt.year}-{dt.month:02}"
 
 
-def bin_flux_and_plot(lc, ax, bins=200, aggregate_func=np.nanmedian):
+def bin_flux_and_plot(lc, ax, bins=200, aggregate_func=np.nanmedian, binned_label=None):
     # I need to first copy the object because of issues in underlying astropy FoldedTimeSeries
     #  (e.g., normalized phase time column is in Quantity type rather than Time)
     lc_min = lc.copy()
@@ -78,7 +78,7 @@ def bin_flux_and_plot(lc, ax, bins=200, aggregate_func=np.nanmedian):
     # by default use median (instead of mean) to reduce the effect of outliers
     lc_b = lc_min.bin(bins=bins, aggregate_func=aggregate_func)
 
-    ax = lc_b.scatter(ax=ax, c="black", s=16, label="binned")
+    ax = lc_b.scatter(ax=ax, c="black", s=16, label=binned_label)
 
     return lc_b
 
@@ -160,10 +160,11 @@ def create_phase_plot(
         fig.suptitle(f"{target_name}, P: {r['Period']} d", fontsize=12, y=1.05)
 
         # ax = tplt.scatter_partition_by(lc_f, "camera", ax=axs["pri"], s=1)
-        ax = lc_f.scatter(ax=axs["pri"], s=1, label="t0: primary", c=lc_f.time_original.value, show_colorbar=False)
+        ax = lc_f.scatter(ax=axs["pri"], s=1, label=None, c=lc_f.time_original.value, show_colorbar=False)
         ax.set_xlim(wrap_phase - 1, wrap_phase)  # ensure constant x scale independent of the data
 
         min_i_est = SimpleNamespace(idx=-1, time=np.nan, flux=np.nan * lc_f.flux.unit, depth=np.nan * lc_f.flux.unit)
+        lc_f_b = None
         if len(lc_f) > 40:
             # attempt binning only if there is some reasonable number of data points
             try:
@@ -172,7 +173,13 @@ def create_phase_plot(
             except Exception as e:
                 print(f"Unexpected error in binning {target_name}. Binning is skipped. {e}")
 
-        ax.legend(loc="lower right")
+        ax.axvline(0, 0, 0.15, c="red", linewidth=2, linestyle="--", label="t0 (primary)")
+        s_phase = safe_get(r, "Phase_sec")
+        if np.isfinite(s_phase):
+            ax.axvline(s_phase, 0, 0.08, c="red", linewidth=2, linestyle="dotted", label="t0_sec")
+
+        ax.legend(loc="lower right" if s_phase < 0 else "lower left")
+
         flux_err_median = np.nanmedian(lc.flux_err)
         camera_like_info = ""
         if "camera" in lc.colnames:  # SuperWASP-specific
@@ -191,7 +198,9 @@ baseline: {_to_yyyy_mm(lc.time.min())} - {_to_yyyy_mm(lc.time.max())} ({(lc.time
         p_zoom_width = min(max(p_zoom_width, 0.1), 0.5)  # but with a min / max of 0.1 / 0.5
         xlim = (p_phase - p_zoom_width / 2, p_phase + p_zoom_width / 2)
         p_lc_f = lc_f.truncate(*xlim)
-        ax = p_lc_f.scatter(s=9, alpha=0.3, ax=axs["priz left"], label=None)
+        ax = p_lc_f.scatter(s=4, c="gray", alpha=0.4, ax=axs["priz left"], label=None)
+        if lc_f_b is not None:
+            ax = lc_f_b.truncate(*xlim).scatter(s=25, alpha=0.9, ax=ax, label=None)
         ax.set_xlim(*xlim)  # ensure expected eclipses are centered and x scale is constant
         ax.axvspan(p_phase - p_dur / 2, p_phase + p_dur / 2, color="red", alpha=0.2)
         f_median = np.nanmedian(lc.flux)
@@ -214,7 +223,9 @@ baseline: {_to_yyyy_mm(lc.time.min())} - {_to_yyyy_mm(lc.time.max())} ({(lc.time
             s_zoom_width = min(max(s_zoom_width, 0.1), 0.5)  # but with a min / max of 0.1 / 0.5
             xlim = (s_phase - s_zoom_width / 2, s_phase + s_zoom_width / 2)
             s_lc_f = lc_f.truncate(*xlim)
-            ax = s_lc_f.scatter(s=9, alpha=0.3, ax=axs["priz right"], label=None)
+            ax = s_lc_f.scatter(s=4, c="gray", alpha=0.4, ax=axs["priz right"], label=None)
+            if lc_f_b is not None:
+                ax = lc_f_b.truncate(*xlim).scatter(s=25, alpha=0.9, ax=ax, label=None)
             ax.set_xlim(*xlim)  # ensure expected eclipses are centered and x scale is constant
             ax.axvspan(s_phase - s_dur / 2, s_phase + s_dur / 2, color="red", alpha=0.1)
             f_median = np.nanmedian(lc.flux)
