@@ -171,6 +171,13 @@ def create_phase_plot(
         ax = lc_f.scatter(ax=axs["pri"], s=1, label=None, c=lc_f.time_original.value, show_colorbar=False)
         ax.set_xlim(wrap_phase - 1, wrap_phase)  # ensure constant x scale independent of the data
 
+        # gather some stats (to be returned and/or used in the plot)
+        # - for num data points in pri, sec
+        # - median error
+        flux_err_median = np.nanmedian(lc.flux_err)
+        num_points_in_pri = np.nan  # placeholder
+        num_points_in_sec = np.nan  # placeholder
+        # placeholder value in case Min I is not estimated
         min_i_est = SimpleNamespace(idx=-1, time=np.nan, flux=np.nan * lc_f.flux.unit, depth=np.nan * lc_f.flux.unit)
         lc_f_b = None
         if len(lc_f) > 40:
@@ -187,7 +194,6 @@ def create_phase_plot(
 
         ax.legend(loc="lower right" if s_phase < 0 else "lower left")
 
-        flux_err_median = np.nanmedian(lc.flux_err)
         camera_like_info = ""
         if "camera" in lc.colnames:  # SuperWASP-specific
             camera_like_info = f"  ;  # cameras: {len(np.unique(lc.camera))}"
@@ -201,6 +207,7 @@ baseline: {_to_yyyy_mm(lc.time.min())} - {_to_yyyy_mm(lc.time.max())} ({(lc.time
 
         # second / third plots: zoom to eclipses and annotate the plot with EBP eclipse params,
         p_phase, p_depth, p_dur = 0, r["Depth [ppt]"], r["Duration [hr]"] / 24 / r['Period']
+        num_points_in_pri = len(lc_f.truncate(p_phase - p_dur / 2, p_phase + p_dur / 2))
         p_zoom_width = p_dur * 9  # zoom window proportional to eclipse duration
         p_zoom_width = min(max(p_zoom_width, 0.1), 0.5)  # but with a min / max of 0.1 / 0.5
         xlim = (p_phase - p_zoom_width / 2, p_phase + p_zoom_width / 2)
@@ -223,7 +230,8 @@ baseline: {_to_yyyy_mm(lc.time.min())} - {_to_yyyy_mm(lc.time.max())} ({(lc.time
 
         if np.isfinite(s_phase):
             # Zoom in to secondary
-            s_depth, s_dur = r["Depth_sec"], r["Duration_sec"] / 24 / r['Period']
+            s_depth, s_dur = r["Depth_sec"], r["Duration_sec"] / 24 / r['Period']  # s_phase obtained at the beginning
+            num_points_in_sec = len(lc_f.truncate(s_phase - s_dur / 2, s_phase + s_dur / 2))
             s_zoom_width = s_dur * 9  # zoom window proportional to eclipse duration
             s_zoom_width = min(max(s_zoom_width, 0.1), 0.5)  # but with a min / max of 0.1 / 0.5
             xlim = (s_phase - s_zoom_width / 2, s_phase + s_zoom_width / 2)
@@ -253,7 +261,13 @@ baseline: {_to_yyyy_mm(lc.time.min())} - {_to_yyyy_mm(lc.time.max())} ({(lc.time
             # Note: avoid using ax.set_title(), as it will bleed into the zoom plot above
             # ax.text(0.98, 0.98, f"P_sec: {lc_f_sec.period}", transform=ax.transAxes,  ha="right", va="top")
 
-    return fig, lc, lc_f, min_i_est
+    stats = SimpleNamespace(
+        flux_err_median=flux_err_median,
+        num_points_in_pri=num_points_in_pri,
+        num_points_in_sec=num_points_in_sec,
+        min_i_est=min_i_est,
+    )
+    return fig, lc, lc_f, stats
 
 
 def create_superwasp_phase_plot(
@@ -280,7 +294,7 @@ def create_superwasp_phase_plot(
         lc_orig = lc_preprocess_func(lc_orig)
 
     # returned LC has outliers truncated
-    fig, lc, lc_f, min_i_est = create_phase_plot(
+    fig, lc, lc_f, stats = create_phase_plot(
         lc_orig, f"{lc_orig.label} / TIC {tic}", r, "btjd",
         truncate_sigma_upper=truncate_sigma_upper, truncate_sigma_lower=truncate_sigma_lower,
         wrap_phase=wrap_phase,
@@ -293,12 +307,12 @@ def create_superwasp_phase_plot(
         plt.show()
 
     return SimpleNamespace(
-        sourceid=sourceid, tic=tic, lc_orig=lc_orig, lc=lc, lc_f=lc_f, fig=fig, min_i_est=min_i_est,
+        sourceid=sourceid, tic=tic, lc_orig=lc_orig, lc=lc, lc_f=lc_f, fig=fig, stats=stats,
         plot_path=plot_path, skipped=False,
     )
 
 
-def create_all_plots(sleep_time=1, first_n=None, min_i_est_out_path="tmp/superwasptimeseries_match_w_tic_min_i_est.csv", plot_dir="plots/superwasp", skip_if_created=True):
+def create_all_plots(sleep_time=1, first_n=None, stats_out_path="tmp/superwasptimeseries_match_w_tic_stats.csv", plot_dir="plots/superwasp", skip_if_created=True):
     ss_df = pd.read_csv("tmp/superwasptimeseries_match_w_tic_ebp.csv")
     if first_n is not None:
         # process first_n entries, typically for trial, debug
@@ -317,14 +331,17 @@ def create_all_plots(sleep_time=1, first_n=None, min_i_est_out_path="tmp/superwa
                 msg += " [skipped]"
             print(msg)
             plt.close()
-            if min_i_est_out_path is not None and not res.skipped:
-                min_i_est_dict = dict(
+            if stats_out_path is not None and not res.skipped:
+                est_dict = dict(
                     sourceid=row.sourceid,
-                    est_min_i_phase=res.min_i_est.time,
-                    est_min_i_flux=res.min_i_est.flux.value,
-                    est_min_i_depth=res.min_i_est.depth.value,
+                    flux_err_median=res.stats.flux_err_median.value,
+                    num_points_in_pri=res.stats.num_points_in_pri,
+                    num_points_in_sec=res.stats.num_points_in_sec,
+                    est_min_i_phase=res.stats.min_i_est.time,
+                    est_min_i_flux=res.stats.min_i_est.flux.value,
+                    est_min_i_depth=res.stats.min_i_est.depth.value,
                     )
-                to_csv(min_i_est_dict, min_i_est_out_path, mode="a")
+                to_csv(est_dict, stats_out_path, mode="a")
         except requests.HTTPError as he:
             if 400 <= he.response.status_code < 500:
                 # case the requested object is not found. Inform the users and continue
@@ -339,7 +356,7 @@ def create_all_plots(sleep_time=1, first_n=None, min_i_est_out_path="tmp/superwa
 
 
 # From command line
-# - might need to first remove existing tmp/superwasptimeseries_match_w_tic_min_i_est.csv if rerunning
+# - might need to first remove existing tmp/superwasptimeseries_match_w_tic_stats.csv if rerunning
 #   (the script appends to csv)
 if __name__ == "__main__":
     create_all_plots(
