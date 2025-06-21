@@ -125,6 +125,14 @@ def create_phase_plot(
 
     trunc_min, trunc_max = lc.flux.min(), lc.flux.max()
 
+    # Need to first process s_phase before doing any plot
+    # as it affects various aspects
+    s_phase = safe_get(r, "Phase_sec")
+    if s_phase > wrap_phase: # outside (to the right) of the plot, shift to the negative phase counterpart
+        s_phase = s_phase - 1
+    elif wrap_phase - s_phase < 0.05:  # too close to the right edge, shift wrap_phase to give it more margin
+        wrap_phase = min(wrap_phase + 0.1, 1)
+
     t0 = Time(r["T0"], format=t0_time_format)
     lc_f = lc.fold(period=r['Period'], epoch_time=t0, normalize_phase=True, wrap_phase=wrap_phase)
 
@@ -174,7 +182,6 @@ def create_phase_plot(
                 print(f"Unexpected error in binning {target_name}. Binning is skipped. {e}")
 
         ax.axvline(0, 0, 0.15, c="red", linewidth=2, linestyle="--", label="t0 (primary)")
-        s_phase = safe_get(r, "Phase_sec")
         if np.isfinite(s_phase):
             ax.axvline(s_phase, 0, 0.08, c="red", linewidth=2, linestyle="dotted", label="t0_sec")
 
@@ -214,11 +221,9 @@ baseline: {_to_yyyy_mm(lc.time.min())} - {_to_yyyy_mm(lc.time.max())} ({(lc.time
         )
         ax.set_xlabel(None)
 
-        if np.isfinite(safe_get(r, "Phase_sec")):
+        if np.isfinite(s_phase):
             # Zoom in to secondary
-            s_phase, s_depth, s_dur = r["Phase_sec"], r["Depth_sec"], r["Duration_sec"] / 24 / r['Period']
-            if s_phase > wrap_phase:
-                s_phase = s_phase - 1
+            s_depth, s_dur = r["Depth_sec"], r["Duration_sec"] / 24 / r['Period']
             s_zoom_width = s_dur * 9  # zoom window proportional to eclipse duration
             s_zoom_width = min(max(s_zoom_width, 0.1), 0.5)  # but with a min / max of 0.1 / 0.5
             xlim = (s_phase - s_zoom_width / 2, s_phase + s_zoom_width / 2)
