@@ -105,13 +105,31 @@ def create_phase_plot(
         except KeyError:
             return default_value
 
-    def get_t0_secondary():
+    def get_t0_secondary():  # TODO: is the logic still sound given r["Phase_sec"] is rounded?
         if np.isfinite(safe_get(r, "T0_sec")):  # has secondary eclipses
             return Time(r["T0_sec"], format=t0_time_format)
         elif np.isfinite(safe_get(r, ["Phase_sec"])):  # has secondary eclipses (in phase)
             return Time(r["T0"] + r["Period"] * r["Phase_sec"], format=t0_time_format)
         else:
             return None
+
+    def get_t0_secondary_phase():
+        # Note: r["Phase_sec"] value is rounded, and is unsuitable for plots
+        t0_sec = safe_get(r, "T0_sec")
+
+        if not np.isfinite(t0_sec):
+            return np.nan
+
+        t0 = r["T0"]
+        period = r["Period"]
+
+        s_phase = ((t0_sec - t0) / period) % 1
+        # shift s_phase to the plot range, defined by wrap_phase:
+        if s_phase < wrap_phase - 1:  # too small, e.g. -0.4
+            s_phase += 1
+        elif s_phase > wrap_phase: # too large, e.g., 0.9
+            s_phase -= 1
+        return s_phase
 
     if target_name is None:
         target_name = lc.meta.get("LABEL", "<No target name>")
@@ -127,10 +145,8 @@ def create_phase_plot(
 
     # Need to first process s_phase before doing any plot
     # as it affects various aspects
-    s_phase = safe_get(r, "Phase_sec")
-    if s_phase > wrap_phase: # outside (to the right) of the plot, shift to the negative phase counterpart
-        s_phase = s_phase - 1
-    elif wrap_phase - s_phase < 0.05:  # too close to the right edge, shift wrap_phase to give it more margin
+    s_phase = get_t0_secondary_phase()
+    if wrap_phase - s_phase < 0.05:  # too close to the right edge, shift wrap_phase to give it more margin
         wrap_phase = min(wrap_phase + 0.1, 1)
 
     t0 = Time(r["T0"], format=t0_time_format)
