@@ -4,11 +4,8 @@ __pycache__/
 poetry.lock
 
 
-multi_stars/data/cache/*.csv
-multi_stars/data/cache/**/*.json
-archival_data/data/cache/superwasp/*.csv
-archival_data/data/cache/superwasp/*.fits
-archival_data/data/cache/superwasp/*.tbl
+multi_stars/data/cache/**/*
+archival_data/data/cache/**/*
 
 *Scratch*.ipynb
 tmp/
