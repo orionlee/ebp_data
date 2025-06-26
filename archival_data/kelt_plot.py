@@ -5,17 +5,22 @@ if "../../PH_TESS_LightCurveViewer/" not in sys.path:  # to get some helpers
 
 import os
 import re
+from types import SimpleNamespace
 
 from astropy.table import Table, MaskedColumn, join, vstack
 from astropy.time import Time
 
+import numpy as np
+
+import matplotlib.pyplot as plt
+
 import lightkurve as lk
 
-
-import numpy as np
+from common_plot import create_phase_plot
 
 # my helpers
 import lightkurve_ext as lke
+
 
 # def _read_a_kelt_tbl(path_or_url, kelt_id=None) -> lk.LightCurve:
 #     tab = Table.read(path_or_url, format="ascii.ipac")
@@ -143,3 +148,92 @@ def read_kelt_tbls(
     lc.meta = lc_east.meta
 
     return lc
+
+
+#
+# Plot codes
+#
+
+
+def _plot_zoomed_lc(lc, lc_b, ax):
+    lc_e = lc[lc["orientation"] == "east"]
+    lc_w = lc[lc["orientation"] == "west"]
+    lc_e.scatter(s=4, c="darkgreen", alpha=0.4, ax=ax, label=None)
+    lc_w.scatter(s=4, c="orange", alpha=0.4, ax=ax, label=None)
+
+    if lc_b is not None:
+        lc_b.scatter(s=25, alpha=0.9, ax=ax, label=None)
+    return ax
+
+
+def _plot_zoomed_lc_w_label(lc, lc_b, ax):
+    lc_e = lc[lc["orientation"] == "east"]
+    lc_w = lc[lc["orientation"] == "west"]
+    lc_e.scatter(s=4, c="darkgreen", alpha=0.4, ax=ax, label="east")
+    lc_w.scatter(s=4, c="orange", alpha=0.4, ax=ax, label="west")
+
+    if lc_b is not None:
+        lc_b.scatter(s=25, alpha=0.9, ax=ax, label=None)
+    ax.legend(loc="upper left")
+    return ax
+
+
+def create_kelt_phase_plot(
+    row,
+    flux_column=None,
+    lc_preprocess_func=None,
+    truncate_sigma_upper=3,
+    truncate_sigma_lower=9,
+    wrap_phase=0.7,
+    display_plot=False,
+    save_plot=False,
+    plot_dir="plots/kelt",
+    skip_if_created=False,
+):
+    r = row  # shorthand to be used below
+
+    sourceid, tic = r.kelt_sourceid, r.TIC
+
+    plot_filename = f"{sourceid.replace(' ', '_')}.png"
+    plot_path = f"{plot_dir}/{plot_filename}"
+
+    if skip_if_created and os.path.isfile(plot_path):
+        return SimpleNamespace(
+            sourceid=sourceid, tic=tic, plot_path=plot_path, skipped=True
+        )
+
+    lc_orig = read_kelt_tbls(sourceid, flux_column=flux_column)
+
+    if lc_preprocess_func is not None:
+        lc_orig = lc_preprocess_func(lc_orig)
+
+    # returned LC has outliers truncated
+    fig, lc, lc_f, stats = create_phase_plot(
+        lc_orig,
+        f"{lc_orig.label} / TIC {tic}",
+        r,
+        "btjd",
+        truncate_sigma_upper=truncate_sigma_upper,
+        truncate_sigma_lower=truncate_sigma_lower,
+        wrap_phase=wrap_phase,
+        plot_zoomed_lc_func_left=_plot_zoomed_lc_w_label,
+        plot_zoomed_lc_func_right=_plot_zoomed_lc,
+    )
+
+    if save_plot:
+        fig.savefig(plot_path, dpi=72, bbox_inches="tight")
+
+    if display_plot:
+        plt.show()
+
+    return SimpleNamespace(
+        sourceid=sourceid,
+        tic=tic,
+        lc_orig=lc_orig,
+        lc=lc,
+        lc_f=lc_f,
+        fig=fig,
+        stats=stats,
+        plot_path=plot_path,
+        skipped=False,
+    )

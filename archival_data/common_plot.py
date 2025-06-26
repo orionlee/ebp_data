@@ -45,11 +45,20 @@ def estimate_min_and_plot(lc_b, ax):
     return SimpleNamespace(idx=min_idx, time=min_time, flux=min_flux, depth=depth)
 
 
+def _plot_zoomed_lc(lc, lc_b, ax):
+    lc.scatter(s=4, c="gray", alpha=0.4, ax=ax, label=None)
+    if lc_b is not None:
+        lc_b.scatter(s=25, alpha=0.9, ax=ax, label=None)
+    return ax
+
+
 def create_phase_plot(
     lc, target_name, r, t0_time_format,
     truncate_sigma_upper=3, truncate_sigma_lower=9,
     wrap_phase=0.7,
     show_secondary_phase_plot=False,
+    plot_zoomed_lc_func_left=_plot_zoomed_lc,
+    plot_zoomed_lc_func_right=_plot_zoomed_lc,
 ):
     def safe_get(dict_like, key, default_value=np.nan):
         try:
@@ -179,10 +188,11 @@ baseline: {_to_yyyy_mm(lc.time.min())} - {_to_yyyy_mm(lc.time.max())} ({(lc.time
         p_zoom_width = p_dur * 9  # zoom window proportional to eclipse duration
         p_zoom_width = min(max(p_zoom_width, 0.1), 0.5)  # but with a min / max of 0.1 / 0.5
         xlim = (p_phase - p_zoom_width / 2, p_phase + p_zoom_width / 2)
-        p_lc_f = lc_f.truncate(*xlim)
-        ax = p_lc_f.scatter(s=4, c="gray", alpha=0.4, ax=axs["priz left"], label=None)
-        if lc_f_b is not None:
-            ax = lc_f_b.truncate(*xlim).scatter(s=25, alpha=0.9, ax=ax, label=None)
+        ax = plot_zoomed_lc_func_left(
+            lc_f.truncate(*xlim),
+            lc_f_b.truncate(*xlim) if lc_f_b is not None else None,
+            axs["priz left"],
+        )
         ax.set_xlim(*xlim)  # ensure expected eclipses are centered and x scale is constant
         ax.axvspan(p_phase - p_dur / 2, p_phase + p_dur / 2, color="red", alpha=0.2)
         f_median = np.nanmedian(lc.flux)
@@ -203,10 +213,11 @@ baseline: {_to_yyyy_mm(lc.time.min())} - {_to_yyyy_mm(lc.time.max())} ({(lc.time
             s_zoom_width = s_dur * 9  # zoom window proportional to eclipse duration
             s_zoom_width = min(max(s_zoom_width, 0.1), 0.5)  # but with a min / max of 0.1 / 0.5
             xlim = (s_phase - s_zoom_width / 2, s_phase + s_zoom_width / 2)
-            s_lc_f = lc_f.truncate(*xlim)
-            ax = s_lc_f.scatter(s=4, c="gray", alpha=0.4, ax=axs["priz right"], label=None)
-            if lc_f_b is not None:
-                ax = lc_f_b.truncate(*xlim).scatter(s=25, alpha=0.9, ax=ax, label=None)
+            ax = plot_zoomed_lc_func_right(
+                lc_f.truncate(*xlim),
+                lc_f_b.truncate(*xlim) if lc_f_b is not None else None,
+                axs["priz right"],
+            )
             ax.set_xlim(*xlim)  # ensure expected eclipses are centered and x scale is constant
             ax.axvspan(s_phase - s_dur / 2, s_phase + s_dur / 2, color="red", alpha=0.1)
             f_median = np.nanmedian(lc.flux)
