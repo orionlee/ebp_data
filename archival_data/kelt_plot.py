@@ -190,7 +190,6 @@ def _plot_zoomed_lc_w_label(lc, lc_b, ax):
 
 def create_kelt_phase_plot(
     row,
-    flux_column=None,
     lc_preprocess_func=None,
     truncate_sigma_upper=3,
     truncate_sigma_lower=9,
@@ -204,10 +203,7 @@ def create_kelt_phase_plot(
 
     sourceid, tic = r.kelt_sourceid, r.TIC
 
-    if flux_column is None:
-        flux_column = "raw_mag"
-    plot_filename_suffix = re.sub("_.+$", "", flux_column)
-    plot_filename = f"{sourceid.replace(' ', '_')}_{plot_filename_suffix}.png"
+    plot_filename = f"{sourceid.replace(' ', '_')}.png"
     plot_path = f"{plot_dir}/{plot_filename}"
 
     if skip_if_created and os.path.isfile(plot_path):
@@ -215,24 +211,65 @@ def create_kelt_phase_plot(
             sourceid=sourceid, tic=tic, plot_path=plot_path, skipped=True
         )
 
-    lc_orig = read_kelt_tbls(sourceid, flux_column=flux_column)
+    fig, axs = plt.subplot_mosaic(
+        [
+            ["r_pri", "r_pri",  "t_pri", "t_pri"],
+            ["r_priz left", "r_priz right",  "t_priz left", "t_priz right"],  # zoomed to eclipses
+        ],
+        figsize=(8.5 * 2, 4 * 2),
+    )
+    fig.tight_layout(w_pad=4)  # to add horizontal space between the RAW plot (left) and TAF plot (right)
 
+    flux_column ="raw_mag"
+    lc_orig = read_kelt_tbls(sourceid, flux_column=flux_column)
     if lc_preprocess_func is not None:
         lc_orig = lc_preprocess_func(lc_orig)
 
     # returned LC has outliers truncated
-    fig, lc, lc_f, stats = create_phase_plot(
+    r_axs = {"pri": axs["r_pri"], "priz left": axs["r_priz left"], "priz right": axs["r_priz right"]}
+    _, lc, lc_f, stats = create_phase_plot(
         lc_orig,
         f"{lc_orig.label} / TIC {tic}",
         r,
         "btjd",
+        axs=r_axs,
         truncate_sigma_upper=truncate_sigma_upper,
         truncate_sigma_lower=truncate_sigma_lower,
         wrap_phase=wrap_phase,
         plot_zoomed_lc_func_left=_plot_zoomed_lc_w_label,
         plot_zoomed_lc_func_right=_plot_zoomed_lc,
     )
-    fig.axes[0].set_ylabel(f"Normalized {flux_column.upper()}")
+    r_axs["pri"].set_ylabel(f"Normalized {flux_column.upper()}")
+
+    # repeat it for tfa_mag
+    lc_tfa, lc_tfa_f, stats_tfa = None, None, None,
+    try:
+        flux_column = "tfa_mag"
+        lc_orig = read_kelt_tbls(sourceid, flux_column=flux_column)
+        if lc_preprocess_func is not None:
+            lc_orig = lc_preprocess_func(lc_orig)
+
+        # returned LC has outliers truncated
+        t_axs = {"pri": axs["t_pri"], "priz left": axs["t_priz left"], "priz right": axs["t_priz right"]}
+        _, lc_tfa, lc_tfa_f, stats_tfa = create_phase_plot(
+            lc_orig,
+            f"{lc_orig.label} / TIC {tic}",
+            r,
+            "btjd",
+            axs=t_axs,
+            truncate_sigma_upper=truncate_sigma_upper,
+            truncate_sigma_lower=truncate_sigma_lower,
+            wrap_phase=wrap_phase,
+            plot_zoomed_lc_func_left=_plot_zoomed_lc_w_label,
+            plot_zoomed_lc_func_right=_plot_zoomed_lc,
+        )
+        t_axs["pri"].set_ylabel(f"Normalized {flux_column.upper()}")
+    except ValueError as ve:
+        if "not a column" in str(ve):
+            # case the source has no tfa data. Just no-op
+            axs["t_pri"].set_title("[No TFA data]")
+        else:
+            raise ve
 
     if save_plot:
         fig.savefig(plot_path, dpi=72, bbox_inches="tight")
@@ -246,6 +283,9 @@ def create_kelt_phase_plot(
         lc_orig=lc_orig,
         lc=lc,
         lc_f=lc_f,
+        lc_tfa=lc_tfa,
+        lc_tfa_f=lc_tfa_f,
+        stats_tfa=stats_tfa,
         fig=fig,
         stats=stats,
         plot_path=plot_path,
@@ -271,19 +311,9 @@ def create_all_plots(sleep_time=0, first_n=None, stats_out_path="tmp/kelt_match_
             if res.skipped:
                 msg += " [skipped]"
             plt.close()
-            try:
-                create_kelt_phase_plot(
-                    row, flux_column="tfa_mag", display_plot=False, save_plot=True, plot_dir=plot_dir, skip_if_created=skip_if_created
-                    )
-                plt.close()
-            except ValueError as ve:
-                if "not a column" in str(ve):
-                    # case the source has no tfa data. Just no-op
-                    msg += " [No TFA]"
-                else:
-                    raise ve
             print(msg)
             if stats_out_path is not None and not res.skipped:
+                # for now we only store the stats of raw Lc
                 est_dict = dict(
                     sourceid=row.kelt_sourceid,
                     flux_err_median=res.stats.flux_err_median.value,
