@@ -57,6 +57,7 @@ def create_phase_plot(
     truncate_sigma_upper=3, truncate_sigma_lower=9,
     wrap_phase=0.7,
     show_secondary_phase_plot=False,
+    axs=None,
     plot_zoomed_lc_func_left=_plot_zoomed_lc,
     plot_zoomed_lc_func_right=_plot_zoomed_lc,
 ):
@@ -122,25 +123,27 @@ def create_phase_plot(
         lc_f_sec = lc.fold(period=period_sec, epoch_time=t0_sec, normalize_phase=True, wrap_phase=wrap_phase)
 
     with plt.style.context(lk.MPLSTYLE):
-        if not show_secondary_phase_plot:
-            fig, axs = plt.subplot_mosaic(
-                [
-                    ["pri", "pri"],
-                    ["priz left", "priz right"],  # zoomed to eclipses
-                ],
-                figsize=(8, 4 * 2),
-            )
+        if axs is None:
+            if not show_secondary_phase_plot:
+                fig, axs = plt.subplot_mosaic(
+                    [
+                        ["pri", "pri"],
+                        ["priz left", "priz right"],  # zoomed to eclipses
+                    ],
+                    figsize=(8, 4 * 2),
+                )
+            else:
+                fig, axs = plt.subplot_mosaic(
+                    [
+                        ["pri", "pri"],
+                        ["priz left", "priz right"],  # zoomed to eclipses
+                        ["sec", "sec"],
+                    ],
+                    figsize=(8, 4 * 3),
+                )
+            fig.tight_layout()
         else:
-            fig, axs = plt.subplot_mosaic(
-                [
-                    ["pri", "pri"],
-                    ["priz left", "priz right"],  # zoomed to eclipses
-                    ["sec", "sec"],
-                ],
-                figsize=(8, 4 * 3),
-            )
-
-        fig.tight_layout()
+            fig = list(axs.values())[0].get_figure()
 
         fig.suptitle(f"{target_name}, P: {r['Period']} d", fontsize=12, y=1.05)
 

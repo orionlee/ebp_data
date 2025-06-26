@@ -11,6 +11,7 @@ from astropy.table import Table, MaskedColumn, join, vstack
 from astropy.time import Time
 
 import numpy as np
+import pandas as pd
 
 import matplotlib.pyplot as plt
 
@@ -20,6 +21,15 @@ from common_plot import create_phase_plot
 
 # my helpers
 import lightkurve_ext as lke
+
+
+# needed for create_all_plots
+if "../" not in sys.path:  # to get some helpers
+    sys.path.append("../")
+
+import time
+import requests
+from multi_stars.common import to_csv  # from ../multi_stars
 
 
 # def _read_a_kelt_tbl(path_or_url, kelt_id=None) -> lk.LightCurve:
@@ -194,7 +204,10 @@ def create_kelt_phase_plot(
 
     sourceid, tic = r.kelt_sourceid, r.TIC
 
-    plot_filename = f"{sourceid.replace(' ', '_')}.png"
+    if flux_column is None:
+        flux_column = "raw_mag"
+    plot_filename_suffix = re.sub("_.+$", "", flux_column)
+    plot_filename = f"{sourceid.replace(' ', '_')}_{plot_filename_suffix}.png"
     plot_path = f"{plot_dir}/{plot_filename}"
 
     if skip_if_created and os.path.isfile(plot_path):
@@ -219,6 +232,7 @@ def create_kelt_phase_plot(
         plot_zoomed_lc_func_left=_plot_zoomed_lc_w_label,
         plot_zoomed_lc_func_right=_plot_zoomed_lc,
     )
+    fig.axes[0].set_ylabel(f"Normalized {flux_column.upper()}")
 
     if save_plot:
         fig.savefig(plot_path, dpi=72, bbox_inches="tight")
@@ -236,4 +250,70 @@ def create_kelt_phase_plot(
         stats=stats,
         plot_path=plot_path,
         skipped=False,
+    )
+
+
+def create_all_plots(sleep_time=0, first_n=None, stats_out_path="tmp/kelt_match_w_tic_stats.csv", plot_dir="plots/kelt", skip_if_created=True):
+    ss_df = pd.read_csv("tmp/kelt_match_w_tic_ebp.csv")
+    if first_n is not None:
+        # process first_n entries, typically for trial, debug
+        ss_df = ss_df.iloc[:first_n]
+    print(f"Creating plots for {len(ss_df)} entries...")
+
+    for i in range(len(ss_df)):
+        row = ss_df.iloc[i]
+        msg = f"{i: >4}: {row.kelt_sourceid}"
+        res = SimpleNamespace(skipped=False)
+        try:
+            res = create_kelt_phase_plot(
+                row, display_plot=False, save_plot=True, plot_dir=plot_dir, skip_if_created=skip_if_created
+                )
+            if res.skipped:
+                msg += " [skipped]"
+            plt.close()
+            try:
+                create_kelt_phase_plot(
+                    row, flux_column="tfa_mag", display_plot=False, save_plot=True, plot_dir=plot_dir, skip_if_created=skip_if_created
+                    )
+                plt.close()
+            except ValueError as ve:
+                if "not a column" in str(ve):
+                    # case the source has no tfa data. Just no-op
+                    msg += " [No TFA]"
+                else:
+                    raise ve
+            print(msg)
+            if stats_out_path is not None and not res.skipped:
+                est_dict = dict(
+                    sourceid=row.kelt_sourceid,
+                    flux_err_median=res.stats.flux_err_median.value,
+                    num_points_in_pri=res.stats.num_points_in_pri,
+                    num_points_in_sec=res.stats.num_points_in_sec,
+                    est_min_i_phase=res.stats.min_i_est.time,
+                    est_min_i_flux=res.stats.min_i_est.flux.value,
+                    est_min_i_depth=res.stats.min_i_est.depth.value,
+                    )
+                to_csv(est_dict, stats_out_path, mode="a")
+        except requests.HTTPError as he:
+            if 400 <= he.response.status_code < 500:
+                # case the requested object is not found. Inform the users and continue
+                msg += f" [not found] {he}"
+                print(msg)
+            else:
+                # raise  other unexpected error
+                raise he
+        if sleep_time is not None and sleep_time > 0 and not res.skipped:
+            # to avoid bombarding the server, not needed if all lightcurves have been downloaded locally
+            time.sleep(sleep_time)
+
+
+# From command line
+# - might need to first remove existing tmp/kelt_match_w_tic_stats.csv if rerunning
+#   (the script appends to csv)
+if __name__ == "__main__":
+    create_all_plots(
+        # first_n=10,
+        sleep_time=0,
+        plot_dir="plots/tmp",
+        skip_if_created=False,
     )
