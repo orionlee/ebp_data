@@ -188,6 +188,20 @@ def _plot_zoomed_lc_w_label(lc, lc_b, ax):
     return ax
 
 
+# not used in the module, but is kept as a convenience for module callers
+# to replace te standard eclipse zoom plots with ones with errorbar
+def _errorbar_zoomed_lc_w_label(lc, lc_b, ax):
+    lc_e = lc[lc["orientation"] == "east"]
+    lc_w = lc[lc["orientation"] == "west"]
+    lc_e.errorbar(marker="o", markersize=2, c="darkgreen", alpha=0.4, ax=ax, label="east")
+    lc_w.errorbar(marker="o", markersize=2, c="orange", alpha=0.4, ax=ax, label="west")
+
+    if lc_b is not None:
+        lc_b.errorbar(marker="o", markersize=4, c="black", alpha=0.9, ax=ax, label=None)
+    ax.legend(loc="upper left")
+    return ax
+
+
 def create_kelt_phase_plot(
     row,
     lc_preprocess_func=None,
@@ -198,6 +212,8 @@ def create_kelt_phase_plot(
     save_plot=False,
     plot_dir="plots/kelt",
     skip_if_created=False,
+    plot_zoomed_lc_func_left=_plot_zoomed_lc_w_label,
+    plot_zoomed_lc_func_right=_plot_zoomed_lc,
 ):
     r = row  # shorthand to be used below
 
@@ -236,8 +252,8 @@ def create_kelt_phase_plot(
         truncate_sigma_upper=truncate_sigma_upper,
         truncate_sigma_lower=truncate_sigma_lower,
         wrap_phase=wrap_phase,
-        plot_zoomed_lc_func_left=_plot_zoomed_lc_w_label,
-        plot_zoomed_lc_func_right=_plot_zoomed_lc,
+        plot_zoomed_lc_func_left=plot_zoomed_lc_func_left,
+        plot_zoomed_lc_func_right=plot_zoomed_lc_func_right,
     )
     r_axs["pri"].set_ylabel(f"Normalized {flux_column.upper()}")
 
@@ -260,8 +276,8 @@ def create_kelt_phase_plot(
             truncate_sigma_upper=truncate_sigma_upper,
             truncate_sigma_lower=truncate_sigma_lower,
             wrap_phase=wrap_phase,
-            plot_zoomed_lc_func_left=_plot_zoomed_lc_w_label,
-            plot_zoomed_lc_func_right=_plot_zoomed_lc,
+            plot_zoomed_lc_func_left=plot_zoomed_lc_func_left,
+            plot_zoomed_lc_func_right=plot_zoomed_lc_func_right,
         )
         t_axs["pri"].set_ylabel(f"Normalized {flux_column.upper()}")
     except ValueError as ve:
