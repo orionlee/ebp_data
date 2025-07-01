@@ -1,3 +1,4 @@
+import os
 import sys
 from types import SimpleNamespace
 
@@ -16,9 +17,18 @@ import matplotlib.pyplot as plt
 
 from common_plot import create_phase_plot
 
-if "../../PH_TESS_LightCurveViewer/" not in sys.path:  # to get some helpers
+if "../../PH_TESS_LightCurveViewer/" not in sys.path:  # to get some helpers from lke
     sys.path.append("../../PH_TESS_LightCurveViewer/")
 import lightkurve_ext as lke
+
+
+# needed for create_all_plots
+if "../" not in sys.path:  # to get some helpers from ../multi_stars
+    sys.path.append("../")
+
+import time
+import requests
+from multi_stars.common import to_csv  # from ../multi_stars
 
 
 def move(df: pd.DataFrame, colname: str, before_colname: str):
@@ -244,7 +254,9 @@ def _plot_zoomed_lc_w_label(lc, lc_b, ax):
     master_ids = np.unique(lc["masterframe"])
     master_ids.sort()  # ensure CSS before SSS
 
-    colors = ["darkgreen", "orange"]
+    # 2 colors should be sufficient for most cases,
+    # add 2 more for some exceptional case
+    colors = ["darkgreen", "orange", "purple", "lightgreen"]
     for i, id in enumerate(master_ids):
         _lc = lc[lc["masterframe"] == id]
 
@@ -324,3 +336,58 @@ def create_catalina_phase_plot(
         skipped=False,
     )
 
+
+def create_all_plots(sleep_time=0, first_n=None, stats_out_path="tmp/cs_match_w_tic_stats.csv", plot_dir="plots/kelt", skip_if_created=True):
+    ss_df = pd.read_csv("tmp/cs_match_w_tic_ebp.csv")
+    if first_n is not None:
+        # process first_n entries, typically for trial, debug
+        ss_df = ss_df.iloc[:first_n]
+    print(f"Creating plots for {len(ss_df)} entries...")
+
+    for i in range(len(ss_df)):
+        row = ss_df.iloc[i]
+        msg = f"{i: >4}: {row.Masters}"
+        res = SimpleNamespace(skipped=False)
+        try:
+            res = create_catalina_phase_plot(
+                row, display_plot=False, save_plot=True, plot_dir=plot_dir, skip_if_created=skip_if_created
+                )
+            if res.skipped:
+                msg += " [skipped]"
+            plt.close()
+            print(msg)
+            if stats_out_path is not None and not res.skipped:
+                # for now we only store the stats of raw Lc
+                est_dict = dict(
+                    sourceid=row.Masters,
+                    flux_err_median=res.stats.flux_err_median.value,
+                    num_points_in_pri=res.stats.num_points_in_pri,
+                    num_points_in_sec=res.stats.num_points_in_sec,
+                    est_min_i_phase=res.stats.min_i_est.time,
+                    est_min_i_flux=res.stats.min_i_est.flux.value,
+                    est_min_i_depth=res.stats.min_i_est.depth.value,
+                    )
+                to_csv(est_dict, stats_out_path, mode="a")
+        except requests.HTTPError as he:
+            if 400 <= he.response.status_code < 500:
+                # case the requested object is not found. Inform the users and continue
+                msg += f" [not found] {he}"
+                print(msg)
+            else:
+                # raise  other unexpected error
+                raise he
+        if sleep_time is not None and sleep_time > 0 and not res.skipped:
+            # to avoid bombarding the server, not needed if all lightcurves have been downloaded locally
+            time.sleep(sleep_time)
+
+
+# From command line
+# - might need to first remove existing tmp/cs_match_w_tic_stats.csv if rerunning
+#   (the script appends to csv)
+if __name__ == "__main__":
+    create_all_plots(
+        # first_n=10,
+        sleep_time=0,
+        plot_dir="plots/tmp",
+        skip_if_created=False,
+    )
