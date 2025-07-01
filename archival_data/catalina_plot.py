@@ -111,6 +111,7 @@ def _to_per_input_summary(df_raw=None):
     by_input = by_master.groupby("InputID").agg(
         Num_IDs=("MasterFrame", "count"),
         CS_Mag_Mean=("Mag", "mean"),
+        Epochs=("Epochs", "sum"),
         MasterFrame1=("MasterFrame", "first"),
         MasterFrame2=("MasterFrame", "last"),
         RA1=("RA", "first"),
@@ -128,7 +129,7 @@ def _to_per_input_summary(df_raw=None):
     return by_input
 
 
-def join_ebp_with_catalina():
+def join_ebp_with_catalina(save=False):
 
     eb_df = read_ebp_csv()
 
@@ -143,7 +144,8 @@ def join_ebp_with_catalina():
 
     move(df, "TIC", "InputID")
 
-    df.to_csv("tmp/cs_match_w_tic_ebp.csv", index=False, mode="w")
+    if save:
+        df.to_csv("tmp/cs_match_w_tic_ebp.csv", index=False, mode="w")
     return df
 
 
