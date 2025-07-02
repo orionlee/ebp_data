@@ -262,9 +262,9 @@ def _plot_zoomed_lc_w_label(lc, lc_b, ax):
 
         # see the heuristics in format_catalina_iau_name()
         label = "CSS" if id < 3000000000000 else "SSS"
-        _lc.scatter(s=9, c=colors[i], alpha=0.4, ax=ax, label=label)
+        _lc.scatter(s=36, c=colors[i], alpha=0.4, ax=ax, label=label)
     if lc_b is not None:
-        lc_b.scatter(s=49, alpha=0.9, ax=ax, label=None)
+        lc_b.scatter(s=100, alpha=0.9, ax=ax, label=None)
     ax.legend(loc="upper left")
     return ax
 

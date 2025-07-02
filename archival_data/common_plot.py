@@ -21,7 +21,7 @@ def _to_yyyy_mm(time_val: Time) -> str:
     return f"{dt.year}-{dt.month:02}"
 
 
-def bin_flux_and_plot(lc, ax, bins=200, aggregate_func=np.nanmedian, binned_label=None):
+def bin_flux_and_plot(lc, ax, bins=200, aggregate_func=np.nanmedian, s_factor=1, binned_label=None):
     # I need to first copy the object because of issues in underlying astropy FoldedTimeSeries
     #  (e.g., normalized phase time column is in Quantity type rather than Time)
     lc_min = lc.copy()
@@ -30,7 +30,7 @@ def bin_flux_and_plot(lc, ax, bins=200, aggregate_func=np.nanmedian, binned_labe
     # by default use median (instead of mean) to reduce the effect of outliers
     lc_b = lc_min.bin(bins=bins, aggregate_func=aggregate_func)
 
-    ax = lc_b.scatter(ax=ax, c="black", s=16, label=binned_label)
+    ax = lc_b.scatter(ax=ax, c="black", alpha=0.7, edgecolors="black", s=16 * (2 ** (s_factor - 1)), label=binned_label)
 
     return lc_b
 
@@ -147,8 +147,11 @@ def create_phase_plot(
 
         fig.suptitle(f"{target_name}, P: {r['Period']} d", fontsize=12, y=1.05)
 
-        # ax = tplt.scatter_partition_by(lc_f, "camera", ax=axs["pri"], s=1)
-        ax = lc_f.scatter(ax=axs["pri"], s=1, label=None, c=lc_f.time_original.value, show_colorbar=False)
+        s_factor, s_factor_bin = 1, 1
+        if len(lc_f) < 600:
+            # case spare data points, make makers larger
+            s_factor, s_factor_bin = 5, 3
+        ax = lc_f.scatter(ax=axs["pri"], s=2 ** (s_factor - 1), label=None, c=lc_f.time_original.value, show_colorbar=False)
         ax.set_xlim(wrap_phase - 1, wrap_phase)  # ensure constant x scale independent of the data
 
         # gather some stats (to be returned and/or used in the plot)
@@ -159,14 +162,17 @@ def create_phase_plot(
         num_points_in_sec = np.nan  # placeholder
         # placeholder value in case Min I is not estimated
         min_i_est = SimpleNamespace(idx=-1, time=np.nan, flux=np.nan * lc_f.flux.unit, depth=np.nan * lc_f.flux.unit)
+        lc_for_min_i_est = lc_f
         lc_f_b = None
-        if len(lc_f) > 40:
+        if len(lc_f) > 600:
             # attempt binning only if there is some reasonable number of data points
+            # (with the default 200 bins, the logic requires at least 3 data points per bin on average)
             try:
-                lc_f_b = bin_flux_and_plot(lc_f, ax)
-                min_i_est = estimate_min_and_plot(lc_f_b, ax)
+                lc_f_b = bin_flux_and_plot(lc_f, ax, s_factor=s_factor_bin)
+                lc_for_min_i_est = lc_f_b
             except Exception as e:
                 print(f"Unexpected error in binning {target_name}. Binning is skipped. {e}")
+        min_i_est = estimate_min_and_plot(lc_for_min_i_est, ax)
 
         ax.axvline(0, 0, 0.15, c="red", linewidth=2, linestyle="--", label="t0 (primary)")
         if np.isfinite(s_phase):
